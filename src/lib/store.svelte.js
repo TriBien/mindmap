@@ -67,6 +67,92 @@ function makeMap(name) {
   }
 }
 
+// Imported files can be hand-edited or come from other tools. Walk from
+// the root and rebuild a clean tree so missing children, duplicate ids and
+// cycles cannot break layout or rendering.
+function sanitizeTree(rawNodes, rawRootId, fallbackName) {
+  if (!rawNodes || typeof rawNodes !== 'object') return null
+  const rootId =
+    typeof rawRootId === 'string' ? rawRootId : String(rawRootId ?? '')
+  if (!rootId || !rawNodes[rootId]) return null
+
+  const out = {}
+  const visited = new Set()
+
+  function visit(id, parentId) {
+    if (
+      !id ||
+      id === '__proto__' ||
+      id === 'constructor' ||
+      id === 'prototype' ||
+      visited.has(id)
+    ) {
+      return null
+    }
+    const raw = rawNodes[id]
+    if (!raw || typeof raw !== 'object') return null
+    visited.add(id)
+
+    const node = {
+      id,
+      text: typeof raw.text === 'string' ? raw.text : String(raw.text ?? ''),
+      parentId,
+      childrenIds: [],
+      collapsed: Boolean(raw.collapsed),
+    }
+
+    const kids = Array.isArray(raw.childrenIds) ? raw.childrenIds : []
+    for (const rawChildId of kids) {
+      const childId =
+        typeof rawChildId === 'string'
+          ? rawChildId
+          : String(rawChildId ?? '')
+      if (!childId || !rawNodes[childId] || visited.has(childId)) continue
+      if (visit(childId, id)) node.childrenIds.push(childId)
+    }
+
+    out[id] = node
+    return node
+  }
+
+  const root = visit(rootId, null)
+  if (!root) return null
+  return {
+    nodes: out,
+    rootId,
+    name: fallbackName || root.text || 'Imported map',
+  }
+}
+
+function normalizeImportedMap(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  let source = raw
+  if (raw.map && typeof raw.map === 'object' && !raw.nodes) {
+    source = { ...raw.map, name: raw.map.name || raw.name }
+  }
+  const tree = sanitizeTree(source.nodes, source.rootId, source.name)
+  if (!tree) return null
+  return {
+    name:
+      typeof source.name === 'string' && source.name.trim()
+        ? source.name.trim()
+        : tree.name,
+    nodes: tree.nodes,
+    rootId: tree.rootId,
+  }
+}
+
+function extractImportMaps(data) {
+  if (Array.isArray(data)) {
+    return data.map(normalizeImportedMap).filter(Boolean)
+  }
+  if (Array.isArray(data?.maps)) {
+    return data.maps.map(normalizeImportedMap).filter(Boolean)
+  }
+  const one = normalizeImportedMap(data)
+  return one ? [one] : []
+}
+
 function loadLibrary() {
   try {
     const raw = localStorage.getItem(LIBRARY_KEY)
@@ -306,12 +392,60 @@ export function deleteMap(id) {
   return true
 }
 
-function uniqueName(base) {
-  const names = new Set(library.maps.map((m) => m.name))
-  if (!names.has(base)) return base
+export function exportMapData(id = library.activeId) {
+  const entry = library.maps.find((m) => m.id === id)
+  if (!entry) return null
+  const active = id === library.activeId
+  return {
+    app: 'mindmap',
+    type: 'map',
+    version: 1,
+    exportedAt: Date.now(),
+    name: entry.name,
+    nodes: clone(active ? map.nodes : entry.nodes),
+    rootId: active ? map.rootId : entry.rootId,
+  }
+}
+
+export function importMaps(data) {
+  const records = extractImportMaps(data)
+  if (!records.length) return null
+
+  save()
+  const now = Date.now()
+  const used = new Set(library.maps.map((m) => m.name))
+  const entries = records.map((record) => {
+    const base =
+      (record.name || record.nodes[record.rootId]?.text || 'Imported map').trim() ||
+      'Imported map'
+    return {
+      id: createId(),
+      name: uniqueName(base, used),
+      createdAt: now,
+      updatedAt: now,
+      nodes: record.nodes,
+      rootId: record.rootId,
+    }
+  })
+
+  library.maps.unshift(...entries)
+  storage.savedAt = now
+  activate(entries[0])
+  return entries[0].id
+}
+
+function uniqueName(base, usedNames) {
+  const names =
+    usedNames ?? new Set(library.maps.map((m) => m.name))
+  if (!names.has(base)) {
+    names.add(base)
+    return base
+  }
   let i = 2
   while (names.has(`${base} ${i}`)) i++
-  return `${base} ${i}`
+  const final = `${base} ${i}`
+  names.add(final)
+  return final
 }
 
 export function select(id) {

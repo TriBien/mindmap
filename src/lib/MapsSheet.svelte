@@ -6,6 +6,8 @@
     switchMap,
     renameMap,
     deleteMap,
+    exportMapData,
+    importMaps,
   } from './store.svelte.js'
 
   let { onclose } = $props()
@@ -16,6 +18,8 @@
   let nameInput = $state(null)
   let confirmId = $state(null)
   let confirmTimer = null
+  let fileInput = $state(null)
+  let importError = $state('')
 
   onMount(() => {
     const timer = setInterval(() => (now = Date.now()), 15_000)
@@ -77,6 +81,50 @@
     if (deleteMap(id)) cancelDelete()
   }
 
+  function exportCurrent() {
+    const data = exportMapData()
+    if (!data) return
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${fileSlug(data.name)}.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  async function onFileChange(e) {
+    const input = e.currentTarget
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    importError = ''
+    try {
+      const data = JSON.parse(await file.text())
+      if (!importMaps(data)) {
+        importError = 'That JSON does not contain a valid mind map.'
+        return
+      }
+      onclose()
+    } catch {
+      importError = 'Could not read that JSON file.'
+    }
+  }
+
+  function fileSlug(name) {
+    return (
+      String(name || 'mindmap')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60) || 'mindmap'
+    )
+  }
+
   function onRenameKey(e) {
     if (e.key === 'Escape') {
       e.preventDefault()
@@ -130,6 +178,46 @@
     </svg>
     <span>New mind map</span>
   </button>
+
+  <div class="tools">
+    <button class="tool" onclick={exportCurrent}>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path
+          d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          fill="none"
+        />
+      </svg>
+      <span>Export map</span>
+    </button>
+    <button class="tool" onclick={() => fileInput?.click()}>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path
+          d="M12 20V10m0 0 4 4m-4-4-4 4M5 5h14"
+          stroke="currentColor"
+          stroke-width="1.9"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          fill="none"
+        />
+      </svg>
+      <span>Import JSON</span>
+    </button>
+    <input
+      bind:this={fileInput}
+      type="file"
+      accept="application/json,.json"
+      onchange={onFileChange}
+      hidden
+    />
+  </div>
+
+  {#if importError}
+    <p class="error">{importError}</p>
+  {/if}
 
   <div class="list">
     {#each maps as entry (entry.id)}
@@ -302,6 +390,38 @@
 
   .new:active {
     background: color-mix(in srgb, var(--accent) 85%, #000);
+  }
+
+  .tools {
+    display: flex;
+    gap: 8px;
+  }
+
+  .tool {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 40px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-h);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .tool:active {
+    background: var(--hover);
+  }
+
+  .error {
+    margin: -4px 0 0;
+    font-size: 12.5px;
+    color: #ef4444;
   }
 
   .list {

@@ -15,6 +15,7 @@ bottom sheet, pinch to zoom, and everything autosaves to `localStorage`.
 - Auto-layout (tidy tree) with per-branch colors
 - Bottom-sheet text editor designed for long text on phones
 - Multiple mind maps: create, rename, switch, and delete from the map title
+- Export a map as JSON; import JSON to add maps (single maps or library backups)
 - Autosaves to `localStorage`
 - Optional Google Drive sync (connect from the status button in the header)
 - Keyboard (desktop): `Enter` edit, `Tab` child, `Delete` remove, `Escape` deselect
@@ -26,7 +27,7 @@ bottom sheet, pinch to zoom, and everything autosaves to `localStorage`.
 | --------- | ---------------------- | -------------------------------------------------------------- |
 | Framework | Svelte 5 (runes)       | Fine-grained reactivity with no virtual DOM or memoization     |
 | Build     | Vite 8                 | Instant HMR, zero-config for Svelte, small production bundles  |
-| Language  | JavaScript + jsconfig  | The app is ~1.2k lines; TypeScript would be overhead here      |
+| Language  | JavaScript + jsconfig  | The app is ~3.1k lines; TypeScript would be overhead here      |
 | State     | `$state` module store  | One reactive object shared by components, no external library  |
 | Storage   | `localStorage` + Drive | Offline persistence, optionally synced to Google Drive        |
 | Deploy    | GitHub Actions → Pages | Free static hosting; every push to `main` redeploys            |
