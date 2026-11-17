@@ -205,6 +205,12 @@ async function readRemote(id) {
   if (!text.trim()) return null
   try {
     const data = JSON.parse(text)
+    if (Array.isArray(data?.maps)) {
+      const valid = data.maps.some(
+        (m) => m?.rootId && m?.nodes?.[m.rootId],
+      )
+      return valid ? data : null
+    }
     if (!data?.rootId || !data.nodes?.[data.rootId]) return null
     return data
   } catch {

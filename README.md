@@ -14,6 +14,7 @@ bottom sheet, pinch to zoom, and everything autosaves to `localStorage`.
 - Collapse/expand branches via the toggle on nodes with children
 - Auto-layout (tidy tree) with per-branch colors
 - Bottom-sheet text editor designed for long text on phones
+- Multiple mind maps: create, rename, switch, and delete from the map title
 - Autosaves to `localStorage`
 - Optional Google Drive sync (connect from the status button in the header)
 - Keyboard (desktop): `Enter` edit, `Tab` child, `Delete` remove, `Escape` deselect
@@ -31,13 +32,13 @@ bottom sheet, pinch to zoom, and everything autosaves to `localStorage`.
 | Deploy    | GitHub Actions → Pages | Free static hosting; every push to `main` redeploys            |
 
 No UI kit, no CSS framework, no state library, no router — the whole app
-is **10 source files / ~1,240 lines** and bundles to ~54 KB JS (21 KB gzip).
+is **15 source files / ~3,100 lines** and bundles to ~75 KB JS (27 KB gzip).
 
 ## High-level design
 
 ```
 ┌──────────────────────────── App.svelte ─────────────────────────────┐
-│  header (title, reset)                                              │
+│  header (map switcher, Drive status, reset)                         │
 │  ┌──────────────────────── stage ─────────────────────────┐         │
 │  │  Canvas.svelte          pan/zoom viewport              │         │
 │  │   └─ world (transform: translate·scale)                │         │
@@ -49,7 +50,7 @@ is **10 source files / ~1,240 lines** and bundles to ~54 KB JS (21 KB gzip).
 │  └────────────────────────────────────────────────────────┘         │
 └─────────────────────────────────────────────────────────────────────┘
 
-store.svelte.js   map = $state({ nodes, rootId, selectedId, editingId })
+store.svelte.js   map = $state({...}); library = $state({ maps, activeId })
 drive.svelte.js   Google OAuth + Drive upload/pull, sync status
 sizes.svelte.js   measured node dimensions (ResizeObserver reports)
 layout.js         pure: nodes + sizes → positions + bezier edges
@@ -58,9 +59,15 @@ gestures.js       shared { moved } flag (distinguishes tap from pan)
 
 ### Data model
 
-A flat map of nodes instead of a nested tree:
+The library holds every saved map, while `map` is the working copy of the
+currently active one:
 
 ```js
+library = {
+  maps: [{ id, name, createdAt, updatedAt, nodes, rootId }],
+  activeId,
+}
+
 map = {
   nodes: { [id]: { id, text, parentId, childrenIds, collapsed } },
   rootId,
@@ -69,10 +76,11 @@ map = {
 }
 ```
 
-Lookup by id is O(1); structural edits (`addChild`, `removeNode`) only
-touch the parent's `childrenIds`. Since `map` is a single `$state`
-proxy, any mutation anywhere invalidates only the derived values that
-read the changed fields.
+A map itself is a flat node map instead of a nested tree. Lookup by id is
+O(1); structural edits (`addChild`, `removeNode`) only touch the parent's
+`childrenIds`. Since `map` is a single `$state` proxy, any mutation
+anywhere invalidates only the derived values that read the changed fields.
+Saving copies the active working map back into its library entry.
 
 ### How the pieces work
 
@@ -126,17 +134,19 @@ node keeps its old text.
 
 **5. Persistence**
 
-A single `$effect` stringifies `map.nodes` on every mutation and
-writes `localStorage`. Save is debounced only by the effect flush, so
-a reload always restores the last committed state.
+A single `$effect` stringifies the active `map.nodes` on every mutation;
+`save()` copies it into the active library entry and writes the whole
+library to `localStorage`. Save is debounced only by the effect flush, so
+a reload always restores the last committed state and active map.
 
 Google Drive sync is optional and layered on top. The header status
 button shows the connection state; opening it lets you connect, run a
 manual sync, or disconnect. While connected, local changes are pushed
 to `mindmap.json` after a short debounce, and the app checks Drive every
-30 seconds (and when the tab becomes visible) for a newer copy. Both
-copies carry a `savedAt` timestamp, so last-write-wins. Local storage is
-always kept up to date, even when Drive is disconnected.
+30 seconds (and when the tab becomes visible) for a newer copy. The file
+contains the entire map library plus `activeId`; both copies carry a
+`savedAt` timestamp, so last-write-wins. Local storage is always kept up
+to date, even when Drive is disconnected.
 
 The client ID and Drive file name live in `src/lib/config.json`:
 

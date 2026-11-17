@@ -4,8 +4,10 @@
   import Toolbar from './lib/Toolbar.svelte'
   import EditorSheet from './lib/EditorSheet.svelte'
   import DriveSheet from './lib/DriveSheet.svelte'
+  import MapsSheet from './lib/MapsSheet.svelte'
   import {
     map,
+    library,
     storage,
     save,
     addChild,
@@ -23,6 +25,7 @@
   let canvas = $state(null)
   let confirmReset = $state(false)
   let driveOpen = $state(false)
+  let mapsOpen = $state(false)
 
   $effect(() => {
     // deep read of the tree to track every mutation
@@ -36,12 +39,22 @@
     untrack(() => notifyLocalSave(savedAt))
   })
 
+  // fit the new tree when switching, creating or deleting maps
+  $effect(() => {
+    library.activeId
+    tick().then(() => canvas?.fit())
+  })
+
   // keep the edited node in view above the editor sheet
   $effect(() => {
     const id = map.editingId
     if (!id) return
     tick().then(() => canvas?.ensureVisible(id))
   })
+
+  const activeName = $derived(
+    library.maps.find((m) => m.id === library.activeId)?.name || 'Mind Map',
+  )
 
   const driveLabel = $derived.by(() => {
     if (!drive.configured) return 'Drive off'
@@ -73,7 +86,7 @@
   }
 
   function onKeydown(e) {
-    if (map.editingId) return
+    if (map.editingId || mapsOpen || driveOpen) return
     const sel = map.selectedId
     if (!sel) return
     if (e.key === 'Enter') {
@@ -106,7 +119,26 @@
 
 <main>
   <header>
-    <h1>Mind Map</h1>
+    <button
+      class="map-title"
+      onclick={() => (mapsOpen = true)}
+      aria-label="Open mind maps"
+    >
+      <span class="app">Mind Map</span>
+      <span class="name-row">
+        <span class="name">{activeName}</span>
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <path
+            d="m6 9 6 6 6-6"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"
+          />
+        </svg>
+      </span>
+    </button>
     <div class="header-actions">
       <button
         class="status {driveTone}"
@@ -139,6 +171,10 @@
   {#if driveOpen}
     <DriveSheet onclose={() => (driveOpen = false)} />
   {/if}
+
+  {#if mapsOpen}
+    <MapsSheet onclose={() => (mapsOpen = false)} />
+  {/if}
 </main>
 
 <style>
@@ -159,12 +195,56 @@
     z-index: 5;
   }
 
-  h1 {
-    margin: 0;
+  .map-title {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    min-width: 0;
+    max-width: min(42vw, 220px);
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .map-title .app {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .map-title .name-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .map-title .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 17px;
     font-weight: 600;
     color: var(--text-h);
     letter-spacing: -0.2px;
+  }
+
+  .map-title svg {
+    flex: none;
+    color: var(--text);
+  }
+
+  .map-title:active .name {
+    opacity: 0.6;
   }
 
   .header-actions {

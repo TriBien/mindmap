@@ -48,7 +48,7 @@
     return {
       tone: 'off',
       title: 'Not connected',
-      detail: 'Your map is saved on this device only.',
+      detail: 'Your maps are saved on this device only.',
     }
   })
 
@@ -123,7 +123,7 @@
     </div>
   {:else}
     <p class="note">
-      Your map stays in this browser and is copied to
+      Your mind maps stay in this browser and are copied to
       <strong>{drive.fileName}</strong> in Google Drive. When you connect, the
       newest copy wins.
     </p>

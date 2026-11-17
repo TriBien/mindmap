@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'mindmap.v1'
+const LEGACY_KEY = 'mindmap.v1'
+const LIBRARY_KEY = 'mindmap.library.v1'
 const PALETTE = [
   '#6366f1',
   '#ec4899',
@@ -18,8 +19,8 @@ function makeNode(text, parentId = null) {
   return { id: createId(), text, parentId, childrenIds: [], collapsed: false }
 }
 
-function seed() {
-  const root = makeNode('My Map')
+function seed(rootText = 'My Map') {
+  const root = makeNode(rootText)
   const nodes = { [root.id]: root }
   for (const t of ['Ideas', 'Tasks', 'Notes']) {
     const n = makeNode(t, root.id)
@@ -29,15 +30,75 @@ function seed() {
   return { nodes, rootId: root.id }
 }
 
-function load() {
+function clone(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function normalizeMap(raw, fallbackName) {
+  if (!raw || typeof raw !== 'object') return null
+  const nodes = raw.nodes
+  const rootId = raw.rootId
+  if (!nodes || typeof nodes !== 'object' || !nodes[rootId]) return null
+  const now = Date.now()
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : createId(),
+    name:
+      (typeof raw.name === 'string' && raw.name.trim()) ||
+      fallbackName ||
+      nodes[rootId].text ||
+      'Untitled map',
+    createdAt: Number(raw.createdAt) || now,
+    updatedAt: Number(raw.updatedAt) || Number(raw.savedAt) || now,
+    nodes,
+    rootId,
+  }
+}
+
+function makeMap(name) {
+  const s = seed(name)
+  const now = Date.now()
+  return {
+    id: createId(),
+    name,
+    createdAt: now,
+    updatedAt: now,
+    nodes: s.nodes,
+    rootId: s.rootId,
+  }
+}
+
+function loadLibrary() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(LIBRARY_KEY)
     if (raw) {
       const data = JSON.parse(raw)
-      if (data?.rootId && data.nodes?.[data.rootId]) {
+      const maps = Array.isArray(data?.maps)
+        ? data.maps.map((m) => normalizeMap(m)).filter(Boolean)
+        : []
+      if (maps.length) {
+        const activeId = maps.some((m) => m.id === data.activeId)
+          ? data.activeId
+          : maps[0].id
         return {
-          nodes: data.nodes,
-          rootId: data.rootId,
+          maps,
+          activeId,
+          savedAt: Number(data.savedAt) || 0,
+        }
+      }
+    }
+  } catch {
+    // fall through to legacy / seed
+  }
+
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY)
+    if (raw) {
+      const data = JSON.parse(raw)
+      const record = normalizeMap(data, data?.nodes?.[data.rootId]?.text)
+      if (record) {
+        return {
+          maps: [record],
+          activeId: record.id,
           savedAt: Number(data.savedAt) || 0,
         }
       }
@@ -45,68 +106,212 @@ function load() {
   } catch {
     // fall through to seed
   }
-  return { ...seed(), savedAt: 0 }
+
+  const record = makeMap('My Map')
+  return { maps: [record], activeId: record.id, savedAt: 0 }
 }
 
-const initial = load()
+const initial = loadLibrary()
+const initialActive =
+  initial.maps.find((m) => m.id === initial.activeId) || initial.maps[0]
 
-export const map = $state({
-  nodes: initial.nodes,
-  rootId: initial.rootId,
-  selectedId: initial.rootId,
-  editingId: null,
+export const library = $state({
+  maps: initial.maps,
+  activeId: initialActive.id,
 })
 
 // Timestamp of the last committed local change. It is included in the
 // Drive payload so two devices can pick the newest copy.
 export const storage = $state({ savedAt: initial.savedAt })
 
-let lastSaved = JSON.stringify({ nodes: initial.nodes, rootId: initial.rootId })
+export const map = $state({
+  nodes: clone(initialActive.nodes),
+  rootId: initialActive.rootId,
+  selectedId: initialActive.rootId,
+  editingId: null,
+})
 
-function writeLocal(savedAt) {
+let lastSaved = JSON.stringify({ nodes: map.nodes, rootId: map.rootId })
+
+function currentEntry() {
+  return library.maps.find((m) => m.id === library.activeId) || null
+}
+
+function writeLocal() {
   try {
     localStorage.setItem(
-      STORAGE_KEY,
+      LIBRARY_KEY,
       JSON.stringify({
-        nodes: map.nodes,
-        rootId: map.rootId,
-        savedAt,
+        version: 2,
+        activeId: library.activeId,
+        savedAt: storage.savedAt,
+        maps: library.maps,
       }),
     )
+    localStorage.removeItem(LEGACY_KEY)
   } catch {
     // storage full or unavailable — ignore
   }
 }
 
+function activate(entry) {
+  library.activeId = entry.id
+  map.nodes = clone(entry.nodes)
+  map.rootId = entry.rootId
+  map.selectedId = entry.rootId
+  map.editingId = null
+  lastSaved = JSON.stringify({ nodes: map.nodes, rootId: map.rootId })
+  writeLocal()
+}
+
 export function save() {
+  const entry = currentEntry()
+  if (!entry) return
   const current = JSON.stringify({ nodes: map.nodes, rootId: map.rootId })
   if (current === lastSaved) return
   lastSaved = current
-  storage.savedAt = Date.now()
-  writeLocal(storage.savedAt)
+  const now = Date.now()
+  entry.nodes = clone(map.nodes)
+  entry.rootId = map.rootId
+  entry.updatedAt = now
+  storage.savedAt = now
+  writeLocal()
 }
 
 export function snapshotData() {
+  const maps = library.maps.map((entry) => {
+    if (entry.id !== library.activeId) return clone(entry)
+    return {
+      id: entry.id,
+      name: entry.name,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      nodes: clone(map.nodes),
+      rootId: map.rootId,
+    }
+  })
   return {
-    nodes: JSON.parse(JSON.stringify(map.nodes)),
-    rootId: map.rootId,
+    version: 2,
+    app: 'mindmap',
+    activeId: library.activeId,
     savedAt: storage.savedAt,
+    maps,
   }
+}
+
+function normalizeLibrary(data, fallbackSavedAt) {
+  if (Array.isArray(data?.maps)) {
+    const maps = data.maps.map((m) => normalizeMap(m)).filter(Boolean)
+    if (maps.length) {
+      return {
+        maps,
+        activeId: maps.some((m) => m.id === data.activeId)
+          ? data.activeId
+          : maps[0].id,
+        savedAt: Number.isFinite(Number(data.savedAt))
+          ? Number(data.savedAt)
+          : fallbackSavedAt,
+      }
+    }
+  }
+
+  // Older Drive payloads stored a single { nodes, rootId, savedAt } map.
+  const legacy = normalizeMap(data)
+  if (legacy) {
+    return {
+      maps: [legacy],
+      activeId: legacy.id,
+      savedAt: Number.isFinite(Number(data?.savedAt))
+        ? Number(data.savedAt)
+        : fallbackSavedAt,
+    }
+  }
+
+  return null
 }
 
 // Apply a remote snapshot without treating it as a new local edit
 // (lastSaved is updated before the autosave effect runs).
 export function applyRemote(data, fallbackSavedAt = 0) {
-  if (!data?.rootId || !data.nodes?.[data.rootId]) return false
-  map.nodes = data.nodes
-  map.rootId = data.rootId
-  map.selectedId = data.rootId
+  const next = normalizeLibrary(data, fallbackSavedAt)
+  if (!next) return false
+
+  library.maps = next.maps
+  library.activeId = next.activeId
+  const active = next.maps.find((m) => m.id === next.activeId) || next.maps[0]
+  map.nodes = clone(active.nodes)
+  map.rootId = active.rootId
+  map.selectedId = active.rootId
   map.editingId = null
-  const savedAt = Number(data.savedAt)
-  storage.savedAt = Number.isFinite(savedAt) ? savedAt : fallbackSavedAt
+  storage.savedAt = next.savedAt
   lastSaved = JSON.stringify({ nodes: map.nodes, rootId: map.rootId })
-  writeLocal(storage.savedAt)
+  writeLocal()
   return true
+}
+
+export function getActiveMap() {
+  return currentEntry()
+}
+
+export function switchMap(id) {
+  if (id === library.activeId) return true
+  const entry = library.maps.find((m) => m.id === id)
+  if (!entry) return false
+  save()
+  activate(entry)
+  return true
+}
+
+export function createMap(name) {
+  save()
+  const clean = String(name ?? '').trim()
+  const finalName = clean || uniqueName('Untitled map')
+  const entry = makeMap(finalName)
+  library.maps.unshift(entry)
+  storage.savedAt = Date.now()
+  activate(entry)
+  return entry.id
+}
+
+export function renameMap(id, name) {
+  const entry = library.maps.find((m) => m.id === id)
+  if (!entry) return false
+  const clean = String(name ?? '').trim()
+  if (!clean) return false
+  if (entry.name === clean) return true
+  entry.name = clean
+  const now = Date.now()
+  entry.updatedAt = now
+  storage.savedAt = now
+  writeLocal()
+  return true
+}
+
+export function deleteMap(id) {
+  const index = library.maps.findIndex((m) => m.id === id)
+  if (index < 0 || library.maps.length <= 1) return false
+
+  const wasActive = library.activeId === id
+  if (!wasActive) save()
+
+  library.maps.splice(index, 1)
+  storage.savedAt = Date.now()
+
+  if (wasActive) {
+    const next = library.maps[Math.min(index, library.maps.length - 1)]
+    activate(next)
+  } else {
+    writeLocal()
+  }
+  return true
+}
+
+function uniqueName(base) {
+  const names = new Set(library.maps.map((m) => m.name))
+  if (!names.has(base)) return base
+  let i = 2
+  while (names.has(`${base} ${i}`)) i++
+  return `${base} ${i}`
 }
 
 export function select(id) {
@@ -199,9 +404,13 @@ export function branchColor(id) {
 }
 
 export function resetMap() {
-  const s = seed()
+  const s = seed(currentEntry()?.name || 'My Map')
   map.nodes = s.nodes
   map.rootId = s.rootId
   map.selectedId = s.rootId
   map.editingId = null
 }
+
+// Persist the freshly loaded/migrated library immediately so map IDs and
+// the active selection are stable across reloads.
+writeLocal()
