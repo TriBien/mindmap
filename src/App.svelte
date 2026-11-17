@@ -21,6 +21,7 @@
     initDrive,
     notifyLocalSave,
   } from './lib/drive.svelte.js'
+  import { theme, toggleTheme, initTheme } from './lib/theme.svelte.js'
 
   let canvas = $state(null)
   let confirmReset = $state(false)
@@ -77,6 +78,7 @@
   )
 
   onMount(() => {
+    initTheme()
     tick().then(() => canvas?.fit())
     initDrive()
   })
@@ -140,6 +142,23 @@
       </span>
     </button>
     <div class="header-actions">
+      <button
+        class="theme-toggle"
+        onclick={toggleTheme}
+        aria-label={theme.dark ? 'Switch to light theme' : 'Switch to dark theme'}
+        title={theme.dark ? 'Light theme' : 'Dark theme'}
+      >
+        {#if theme.dark}
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2" fill="none" />
+            <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" />
+          </svg>
+        {:else}
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          </svg>
+        {/if}
+      </button>
       <button
         class="status {driveTone}"
         onclick={() => (driveOpen = true)}
@@ -251,6 +270,24 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .theme-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text-h);
+    cursor: pointer;
+  }
+
+  .theme-toggle:active {
+    background: var(--hover);
   }
 
   .status {
