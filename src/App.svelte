@@ -1,10 +1,12 @@
 <script>
-  import { onMount, tick } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import Canvas from './lib/Canvas.svelte'
   import Toolbar from './lib/Toolbar.svelte'
   import EditorSheet from './lib/EditorSheet.svelte'
+  import DriveSheet from './lib/DriveSheet.svelte'
   import {
     map,
+    storage,
     save,
     addChild,
     addSibling,
@@ -12,14 +14,26 @@
     startEdit,
     resetMap,
   } from './lib/store.svelte.js'
+  import {
+    drive,
+    initDrive,
+    notifyLocalSave,
+  } from './lib/drive.svelte.js'
 
   let canvas = $state(null)
   let confirmReset = $state(false)
+  let driveOpen = $state(false)
 
   $effect(() => {
     // deep read of the tree to track every mutation
     JSON.stringify(map.nodes)
     save()
+  })
+
+  $effect(() => {
+    // only react to local saves; connection changes must not re-trigger a push
+    const savedAt = storage.savedAt
+    untrack(() => notifyLocalSave(savedAt))
   })
 
   // keep the edited node in view above the editor sheet
@@ -29,8 +43,29 @@
     tick().then(() => canvas?.ensureVisible(id))
   })
 
+  const driveLabel = $derived.by(() => {
+    if (!drive.configured) return 'Drive off'
+    if (drive.status === 'connecting') return 'Connecting'
+    if (drive.status === 'connected') {
+      if (drive.error) return 'Sync issue'
+      return drive.busy ? 'Syncing' : 'Drive on'
+    }
+    return drive.error ? 'Drive issue' : 'Drive off'
+  })
+
+  const driveTone = $derived(
+    drive.status === 'connecting' || drive.busy
+      ? 'busy'
+      : drive.error
+        ? 'error'
+        : drive.status === 'connected'
+          ? 'ok'
+          : 'off',
+  )
+
   onMount(() => {
     tick().then(() => canvas?.fit())
+    initDrive()
   })
 
   function recenter() {
@@ -72,9 +107,20 @@
 <main>
   <header>
     <h1>Mind Map</h1>
-    <button class="ghost" onclick={onReset} class:armed={confirmReset}>
-      {confirmReset ? 'Tap to confirm' : 'Reset'}
-    </button>
+    <div class="header-actions">
+      <button
+        class="status {driveTone}"
+        onclick={() => (driveOpen = true)}
+        aria-label="Google Drive: {driveLabel}"
+        title="Google Drive sync"
+      >
+        <span class="dot" aria-hidden="true"></span>
+        <span class="status-text">{driveLabel}</span>
+      </button>
+      <button class="ghost" onclick={onReset} class:armed={confirmReset}>
+        {confirmReset ? 'Tap to confirm' : 'Reset'}
+      </button>
+    </div>
   </header>
 
   <div class="stage">
@@ -89,6 +135,10 @@
     {/if}
     <EditorSheet />
   </div>
+
+  {#if driveOpen}
+    <DriveSheet onclose={() => (driveOpen = false)} />
+  {/if}
 </main>
 
 <style>
@@ -115,6 +165,62 @@
     font-weight: 600;
     color: var(--text-h);
     letter-spacing: -0.2px;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .status:active {
+    background: var(--hover);
+  }
+
+  .status .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #9ca3af;
+  }
+
+  .status.ok {
+    color: var(--text-h);
+  }
+
+  .status.ok .dot {
+    background: #10b981;
+  }
+
+  .status.busy .dot {
+    background: #f59e0b;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  .status.error .dot {
+    background: #ef4444;
+  }
+
+  @keyframes pulse {
+    50% {
+      opacity: 0.35;
+    }
   }
 
   .ghost {

@@ -34,12 +34,18 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const data = JSON.parse(raw)
-      if (data?.rootId && data.nodes?.[data.rootId]) return data
+      if (data?.rootId && data.nodes?.[data.rootId]) {
+        return {
+          nodes: data.nodes,
+          rootId: data.rootId,
+          savedAt: Number(data.savedAt) || 0,
+        }
+      }
     }
   } catch {
     // fall through to seed
   }
-  return seed()
+  return { ...seed(), savedAt: 0 }
 }
 
 const initial = load()
@@ -51,15 +57,56 @@ export const map = $state({
   editingId: null,
 })
 
-export function save() {
+// Timestamp of the last committed local change. It is included in the
+// Drive payload so two devices can pick the newest copy.
+export const storage = $state({ savedAt: initial.savedAt })
+
+let lastSaved = JSON.stringify({ nodes: initial.nodes, rootId: initial.rootId })
+
+function writeLocal(savedAt) {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ nodes: map.nodes, rootId: map.rootId }),
+      JSON.stringify({
+        nodes: map.nodes,
+        rootId: map.rootId,
+        savedAt,
+      }),
     )
   } catch {
     // storage full or unavailable — ignore
   }
+}
+
+export function save() {
+  const current = JSON.stringify({ nodes: map.nodes, rootId: map.rootId })
+  if (current === lastSaved) return
+  lastSaved = current
+  storage.savedAt = Date.now()
+  writeLocal(storage.savedAt)
+}
+
+export function snapshotData() {
+  return {
+    nodes: JSON.parse(JSON.stringify(map.nodes)),
+    rootId: map.rootId,
+    savedAt: storage.savedAt,
+  }
+}
+
+// Apply a remote snapshot without treating it as a new local edit
+// (lastSaved is updated before the autosave effect runs).
+export function applyRemote(data, fallbackSavedAt = 0) {
+  if (!data?.rootId || !data.nodes?.[data.rootId]) return false
+  map.nodes = data.nodes
+  map.rootId = data.rootId
+  map.selectedId = data.rootId
+  map.editingId = null
+  const savedAt = Number(data.savedAt)
+  storage.savedAt = Number.isFinite(savedAt) ? savedAt : fallbackSavedAt
+  lastSaved = JSON.stringify({ nodes: map.nodes, rootId: map.rootId })
+  writeLocal(storage.savedAt)
+  return true
 }
 
 export function select(id) {
